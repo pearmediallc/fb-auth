@@ -9,36 +9,19 @@ const META_GRAPH_VERSION = 'v18.0';
 const META_GRAPH_URL = `https://graph.facebook.com/${META_GRAPH_VERSION}`;
 
 async function getUserToken(userId: number) {
-  const db = await getDb();
+  const pool = await getDb();
   
-  if (db.sql) {
-    const result = await db.sql`
-      SELECT access_token 
-      FROM user_tokens 
-      WHERE user_id = ${userId} 
-      ORDER BY created_at DESC 
-      LIMIT 1
-    `;
-    
-    if (result.rows.length === 0) {
-      throw new Error('No token found');
-    }
-    
-    return decryptToken(result.rows[0].access_token);
-  } else if (db.pool) {
-    const result = await db.pool.query(
-      'SELECT access_token FROM user_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
-      [userId]
-    );
-    
-    if (result.rows.length === 0) {
-      throw new Error('No token found');
-    }
-    
-    return decryptToken(result.rows[0].access_token);
+  // Use pool directly
+  const result = await pool.query(
+    'SELECT access_token FROM user_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
+    [userId]
+  );
+  
+  if (result.rows.length === 0) {
+    throw new Error('No token found');
   }
   
-  throw new Error('No database connection');
+  return decryptToken(result.rows[0].access_token);
 }
 
 function getAccountStatus(status: number): string {
@@ -66,19 +49,13 @@ export async function POST() {
   }
   
   try {
-    const db = await getDb();
+    const pool = await getDb();
     
     // Clear cache
-    if (db.sql) {
-      await db.sql`
-        DELETE FROM ad_accounts_cache WHERE user_id = ${session.userId}
-      `;
-    } else if (db.pool) {
-      await db.pool.query(
-        'DELETE FROM ad_accounts_cache WHERE user_id = $1',
-        [session.userId]
-      );
-    }
+    await pool.query(
+      'DELETE FROM ad_accounts_cache WHERE user_id = $1',
+      [session.userId]
+    );
     
     // Fetch fresh data
     const accessToken = await getUserToken(session.userId);
@@ -118,17 +95,10 @@ export async function POST() {
     
     // Cache the results
     const accountData = JSON.stringify({ accounts: adAccounts });
-    if (db.sql) {
-      await db.sql`
-        INSERT INTO ad_accounts_cache (user_id, account_data)
-        VALUES (${session.userId}, ${accountData}::jsonb)
-      `;
-    } else if (db.pool) {
-      await db.pool.query(
-        'INSERT INTO ad_accounts_cache (user_id, account_data) VALUES ($1, $2)',
-        [session.userId, accountData]
-      );
-    }
+    await pool.query(
+      'INSERT INTO ad_accounts_cache (user_id, account_data) VALUES ($1, $2)',
+      [session.userId, accountData]
+    );
     
     return NextResponse.json({ accounts: adAccounts, synced: true });
     

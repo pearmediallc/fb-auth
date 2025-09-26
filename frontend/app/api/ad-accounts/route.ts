@@ -9,36 +9,19 @@ const META_GRAPH_VERSION = 'v18.0';
 const META_GRAPH_URL = `https://graph.facebook.com/${META_GRAPH_VERSION}`;
 
 async function getUserToken(userId: number) {
-  const db = await getDb();
+  const pool = await getDb();
   
-  if (db.sql) {
-    const result = await db.sql`
-      SELECT access_token 
-      FROM user_tokens 
-      WHERE user_id = ${userId} 
-      ORDER BY created_at DESC 
-      LIMIT 1
-    `;
-    
-    if (result.rows.length === 0) {
-      throw new Error('No token found');
-    }
-    
-    return decryptToken(result.rows[0].access_token);
-  } else if (db.pool) {
-    const result = await db.pool.query(
-      'SELECT access_token FROM user_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
-      [userId]
-    );
-    
-    if (result.rows.length === 0) {
-      throw new Error('No token found');
-    }
-    
-    return decryptToken(result.rows[0].access_token);
+  // Use pool directly
+  const result = await pool.query(
+    'SELECT access_token FROM user_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
+    [userId]
+  );
+  
+  if (result.rows.length === 0) {
+    throw new Error('No token found');
   }
   
-  throw new Error('No database connection');
+  return decryptToken(result.rows[0].access_token);
 }
 
 function getAccountStatus(status: number): string {
@@ -66,26 +49,13 @@ export async function GET() {
   }
   
   try {
-    const db = await getDb();
+    const pool = await getDb();
     
     // Check cache first
-    let cacheResult;
-    if (db.sql) {
-      cacheResult = await db.sql`
-        SELECT account_data, cached_at 
-        FROM ad_accounts_cache 
-        WHERE user_id = ${session.userId} 
-        ORDER BY cached_at DESC 
-        LIMIT 1
-      `;
-    } else if (db.pool) {
-      cacheResult = await db.pool.query(
-        'SELECT account_data, cached_at FROM ad_accounts_cache WHERE user_id = $1 ORDER BY cached_at DESC LIMIT 1',
-        [session.userId]
-      );
-    } else {
-      throw new Error('No database connection');
-    }
+    const cacheResult = await pool.query(
+      'SELECT account_data, cached_at FROM ad_accounts_cache WHERE user_id = $1 ORDER BY cached_at DESC LIMIT 1',
+      [session.userId]
+    );
     
     const cacheAge = cacheResult.rows.length > 0 
       ? Date.now() - new Date(cacheResult.rows[0].cached_at).getTime()
@@ -133,17 +103,10 @@ export async function GET() {
     
     // Cache the results
     const accountData = JSON.stringify({ accounts: adAccounts });
-    if (db.sql) {
-      await db.sql`
-        INSERT INTO ad_accounts_cache (user_id, account_data)
-        VALUES (${session.userId}, ${accountData}::jsonb)
-      `;
-    } else if (db.pool) {
-      await db.pool.query(
-        'INSERT INTO ad_accounts_cache (user_id, account_data) VALUES ($1, $2)',
-        [session.userId, accountData]
-      );
-    }
+    await pool.query(
+      'INSERT INTO ad_accounts_cache (user_id, account_data) VALUES ($1, $2)',
+      [session.userId, accountData]
+    );
     
     return NextResponse.json({ accounts: adAccounts });
     

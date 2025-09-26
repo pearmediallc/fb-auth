@@ -13,34 +13,19 @@ export async function GET() {
   }
   
   try {
-    const db = await getDb();
+    const pool = await getDb();
     
-    if (db.sql) {
-      const result = await db.sql`
-        SELECT id, meta_user_id, name, email 
-        FROM users 
-        WHERE id = ${session.userId}
-      `;
-      
-      if (result.rows.length === 0) {
-        return NextResponse.json({ error: 'User not found' }, { status: 404 });
-      }
-      
-      return NextResponse.json(result.rows[0]);
-    } else if (db.pool) {
-      const result = await db.pool.query(
-        'SELECT id, meta_user_id, name, email FROM users WHERE id = $1',
-        [session.userId]
-      );
-      
-      if (result.rows.length === 0) {
-        return NextResponse.json({ error: 'User not found' }, { status: 404 });
-      }
-      
-      return NextResponse.json(result.rows[0]);
+    // Use pool directly
+    const result = await pool.query(
+      'SELECT id, meta_user_id, name, email FROM users WHERE id = $1',
+      [session.userId]
+    );
+    
+    if (result.rows.length === 0) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
     
-    throw new Error('No database connection');
+    return NextResponse.json(result.rows[0]);
   } catch (error) {
     console.error('Get user error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
