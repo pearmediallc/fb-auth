@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
     const db = await getDb();
     let userId: number;
     
-    if ('sql' in db) {
+    if (db.sql) {
       // Vercel Postgres
       const existingUser = await db.sql`
         SELECT id FROM users WHERE meta_user_id = ${userData.id}
@@ -88,11 +88,11 @@ export async function GET(req: NextRequest) {
       
       await db.sql`
         INSERT INTO user_tokens (user_id, access_token, token_type, expires_at)
-        VALUES (${userId}, ${encryptedToken}, ${tokenData.token_type}, ${expiresAt})
+        VALUES (${userId}, ${encryptedToken}, ${tokenData.token_type}, ${expiresAt?.toISOString() || null})
       `;
-    } else {
+    } else if (db.pool) {
       // Local development
-      const client = await db.pool!.connect();
+      const client = await db.pool.connect();
       try {
         await client.query('BEGIN');
         
@@ -131,6 +131,8 @@ export async function GET(req: NextRequest) {
       } finally {
         client.release();
       }
+    } else {
+      throw new Error('No database connection');
     }
     
     // Create session

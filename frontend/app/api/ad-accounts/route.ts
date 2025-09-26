@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { decryptToken } from '@/lib/crypto';
 import { getIronSession } from 'iron-session';
@@ -11,7 +11,7 @@ const META_GRAPH_URL = `https://graph.facebook.com/${META_GRAPH_VERSION}`;
 async function getUserToken(userId: number) {
   const db = await getDb();
   
-  if ('sql' in db) {
+  if (db.sql) {
     const result = await db.sql`
       SELECT access_token 
       FROM user_tokens 
@@ -25,8 +25,8 @@ async function getUserToken(userId: number) {
     }
     
     return decryptToken(result.rows[0].access_token);
-  } else {
-    const result = await db.pool!.query(
+  } else if (db.pool) {
+    const result = await db.pool.query(
       'SELECT access_token FROM user_tokens WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
       [userId]
     );
@@ -37,6 +37,8 @@ async function getUserToken(userId: number) {
     
     return decryptToken(result.rows[0].access_token);
   }
+  
+  throw new Error('No database connection');
 }
 
 function getAccountStatus(status: number): string {
@@ -55,7 +57,7 @@ function getAccountStatus(status: number): string {
   return statusMap[status] || 'Unknown';
 }
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   const cookieStore = cookies();
   const session = await getIronSession<SessionData>(cookieStore as any, sessionOptions);
   
@@ -68,7 +70,7 @@ export async function GET(req: NextRequest) {
     
     // Check cache first
     let cacheResult;
-    if ('sql' in db) {
+    if (db.sql) {
       cacheResult = await db.sql`
         SELECT account_data, cached_at 
         FROM ad_accounts_cache 
@@ -76,11 +78,13 @@ export async function GET(req: NextRequest) {
         ORDER BY cached_at DESC 
         LIMIT 1
       `;
-    } else {
-      cacheResult = await db.pool!.query(
+    } else if (db.pool) {
+      cacheResult = await db.pool.query(
         'SELECT account_data, cached_at FROM ad_accounts_cache WHERE user_id = $1 ORDER BY cached_at DESC LIMIT 1',
         [session.userId]
       );
+    } else {
+      throw new Error('No database connection');
     }
     
     const cacheAge = cacheResult.rows.length > 0 
@@ -129,13 +133,13 @@ export async function GET(req: NextRequest) {
     
     // Cache the results
     const accountData = JSON.stringify({ accounts: adAccounts });
-    if ('sql' in db) {
+    if (db.sql) {
       await db.sql`
         INSERT INTO ad_accounts_cache (user_id, account_data)
         VALUES (${session.userId}, ${accountData}::jsonb)
       `;
-    } else {
-      await db.pool!.query(
+    } else if (db.pool) {
+      await db.pool.query(
         'INSERT INTO ad_accounts_cache (user_id, account_data) VALUES ($1, $2)',
         [session.userId, accountData]
       );

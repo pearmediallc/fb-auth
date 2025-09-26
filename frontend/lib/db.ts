@@ -1,32 +1,27 @@
 import { Pool } from 'pg';
-import { sql } from '@vercel/postgres';
+import { sql as vercelSql } from '@vercel/postgres';
 
 let pool: Pool | null = null;
 
 export async function getDb() {
-  // Use Vercel Postgres in production
-  if (process.env.NODE_ENV === 'production') {
-    return { sql };
-  }
-  
-  // Use local pg pool in development
+  // Always use standard pg pool for Neon
   if (!pool) {
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
-      ssl: process.env.DATABASE_URL?.includes('localhost') ? false : {
+      ssl: process.env.NODE_ENV === 'production' ? {
         rejectUnauthorized: false
-      }
+      } : false
     });
   }
   
-  return { pool };
+  return { sql: null, pool };
 }
 
 export async function initializeDatabase() {
   const db = await getDb();
   
   try {
-    if ('sql' in db) {
+    if (db.sql) {
       // Vercel Postgres
       await db.sql`
         CREATE TABLE IF NOT EXISTS users (
@@ -59,9 +54,9 @@ export async function initializeDatabase() {
           cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `;
-    } else {
+    } else if (db.pool) {
       // Local Postgres
-      await db.pool!.query(`
+      await db.pool.query(`
         CREATE TABLE IF NOT EXISTS users (
           id SERIAL PRIMARY KEY,
           meta_user_id VARCHAR(255) UNIQUE NOT NULL,
@@ -72,7 +67,7 @@ export async function initializeDatabase() {
         )
       `);
       
-      await db.pool!.query(`
+      await db.pool.query(`
         CREATE TABLE IF NOT EXISTS user_tokens (
           id SERIAL PRIMARY KEY,
           user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -84,7 +79,7 @@ export async function initializeDatabase() {
         )
       `);
       
-      await db.pool!.query(`
+      await db.pool.query(`
         CREATE TABLE IF NOT EXISTS ad_accounts_cache (
           id SERIAL PRIMARY KEY,
           user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
